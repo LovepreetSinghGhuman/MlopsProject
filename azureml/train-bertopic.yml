@@ -1,0 +1,25 @@
+/BERTopic-Azure-ML-Deployment
+│
+├── /backend
+│   ├── /app
+│   │   ├── main.py                # FastAPI application
+│   │   ├── model.py               # Model training and inference logic
+│   │   ├── requirements.txt        # Python dependencies
+│   │   └── Dockerfile              # Dockerfile for FastAPI app
+│   ├── /k8s
+│   │   ├── deployment.yaml         # Kubernetes deployment configuration
+│   │   └── service.yaml            # Kubernetes service configuration
+│   └── /nginx
+│       ├── nginx.conf              # NGINX configuration
+│       └── Dockerfile              # Dockerfile for NGINX
+│
+├── /frontend
+│   ├── index.html                  # Basic HTML frontend
+│   └── styles.css                  # CSS for styling
+│
+├── /ci-cd
+│   └── .github
+│       └── workflows
+│           └── ci-cd.yml           # GitHub Actions CI/CD pipeline
+│
+└── README.md                       # Project documentation
