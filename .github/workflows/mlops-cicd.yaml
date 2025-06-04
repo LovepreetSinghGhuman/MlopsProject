@@ -1,0 +1,121 @@
+name: MLOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'frontend/**'
+      - 'azureml/**'
+      - 'model/**'
+      - 'k8s/**'
+      - 'nginx/**'
+      - 'BERTSpacy.py'
+      - 'requirements.txt'
+      - 'data/**'
+  workflow_dispatch:
+
+env:
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  AZURE_ML_WORKSPACE: ${{ secrets.AZURE_ML_WORKSPACE }}
+  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+  REGISTRY: ghcr.io/${{ github.repository }}
+
+jobs:
+  train-model:
+    name: Train Model on Azure ML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Azure ML CLI
+        run: |
+          pip install azure-ai-ml azureml-mlflow
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Submit Azure ML Training Job
+        run: |
+          az ml job create --file azureml/train.yml --resource-group $AZURE_RESOURCE_GROUP --workspace-name $AZURE_ML_WORKSPACE
+
+      - name: Download Trained Model Artifact
+        run: |
+          # Example: Download model from Azure ML outputs (adjust as needed)
+          az ml model download --name my-model --version latest --resource-group $AZURE_RESOURCE_GROUP --workspace-name $AZURE_ML_WORKSPACE --download-path model/
+
+  build-and-push-api:
+    name: Build & Push API Docker Image
+    needs: train-model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push API Image
+        run: |
+          docker build -t $REGISTRY/api:latest ./api
+          docker push $REGISTRY/api:latest
+
+  build-and-push-frontend:
+    name: Build & Push Frontend Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Frontend Image
+        run: |
+          docker build -t $REGISTRY/frontend:latest ./frontend
+          docker push $REGISTRY/frontend:latest
+
+  deploy-to-k8s:
+    name: Deploy to Kubernetes
+    needs: [build-and-push-api, build-and-push-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set kubeconfig
+        run: |
+          az aks get-credentials --resource-group $AZURE_RESOURCE_GROUP --name ${{ secrets.AZURE_AKS_CLUSTER }}
+
+      - name: Update API Deployment
+        run: |
+          kubectl set image deployment/api-deployment api=$REGISTRY/api:latest --record
+
+      - name: Update Frontend Deployment
+        run: |
+          kubectl set image deployment/frontend-deployment frontend=$REGISTRY/frontend:latest --record
+
+      - name: Apply K8s Manifests (optional, for config changes)
+        run: |
+          kubectl apply -f k8s/
